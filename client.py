@@ -1,5 +1,4 @@
-from _ast import Or
-from enum import Flag, IntFlag
+from enum import IntFlag
 from typing import Optional
 
 import time
@@ -165,11 +164,70 @@ class MQTTClient:
         pass
 
     def subscribe(self, topic: str):
-        pass
+        # Fixed Header
+        fixed_header = self.MessageTypeAndFlags.SUBSCRIBE | self.MessageTypeAndFlags.NO_FLAGS
+
+        # Properties
+        identifier = 10
+        # Length
+        property_length = 0
+
+        # Payload
+        # Length
+        topic_length = len(topic)
+        option = 1
+
+        variable_header = (identifier.to_bytes(2, 'big') +
+                           property_length.to_bytes(1, 'big'))
+
+        payload = (topic_length.to_bytes(2, 'big') +
+                   topic.encode() +
+                   option.to_bytes(1, "big"))
+
+        # Fixed Header
+        length = len(variable_header + payload)
+
+        data = (fixed_header.to_bytes(1, 'big') + length.to_bytes(1, 'big') +
+                variable_header + payload)
+
+        self.uart_write(data)
+
+        tm = time.time()
+        timeout = False
+        answer = self.uart_read(2)
+
+        while not answer and not timeout:
+            answer = self.uart_read(2)
+            timeout = time.time() - tm > 5
+
+        if not timeout:
+            message_type = int.from_bytes(answer[0])
+            length = int.from_bytes(answer[1])
+
+            if message_type == self.MessageTypeAndFlags.SUBACK:
+                tm = time.time()
+
+                answer = self.uart_read(length)
+
+                while not answer and not timeout:
+                    answer = self.uart_read(length)
+                    timeout = time.time() - tm > 5
+
+                if not timeout:
+                    property_length = int.from_bytes(answer[2])
+                    reason_code = int.from_bytes(answer[3 + property_length])
+
+                    if reason_code in [0, 1, 2]:
+                        return True, None
+                    else:
+                        return False, reason_code
+                else:
+                    return False, -1
+        else:
+            return False, -1
 
     def unsubscribe(self, topic: str):
         pass
 
     def publish(self, topic: str, message: bytes):
-        # topic = "home/room/light", message = "on"/"off"
         pass
