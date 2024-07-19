@@ -1,27 +1,28 @@
-from enum import Enum
+from _ast import Or
+from enum import Flag, IntFlag
 from typing import Optional
-from machine import UART, IDLE
+
+
+# from machine import UART, IDLE
 
 
 class MQTTClient:
+    PROTOCOL_NAME = "04MQTT"
+    PROTOCOL_VERSION = "5"
 
-    class MessageType(Enum):
-        CONNECT = 0b0001
-        CONNACK = 0b0010
-        DISCONNECT = 0b1110
+    class MessageTypeAndFlags(IntFlag):
+        CONNECT = 0b00010000
+        CONNACK = 0b00100000
+        DISCONNECT = 0b11100000
 
-        SUBSCRIBE = 0b1000
-        SUBACK = 0b1001
-        UNSUBSCRIBE = 0b1010
-        UNSUBACK = 0b1011
+        SUBSCRIBE = 0b10000000
+        SUBACK = 0b10010000
+        UNSUBSCRIBE = 0b10100000
+        UNSUBACK = 0b10110000
 
-        PUBLISH = 0b0011
-        PUBACK = 0b0100
+        PUBLISH = 0b00110000
+        PUBACK = 0b01000000
 
-        def __or__(self, other):
-            return self | other
-
-    class Flags(Enum):
         DUP = 0b1000
         QoS1 = 0b0010
         QoS2 = 0b0100
@@ -29,91 +30,99 @@ class MQTTClient:
         RETAIN = 0b0001
         NO_FLAGS = 0b0000
 
-        def __or__(self, other):
-            return self | other
-
-    class ConnectFlags(Enum):
+    class ConnectFlags(IntFlag):
         USERNAME = 0b10000000
         PASSWORD = 0b01000000
+        CLEAR_SESSION = 0b00000010
         NO_FLAGS = 0b00000000
 
-        def __or__(self, other):
-            return self | other
-
     def __init__(self, client_id: str, username, password, baudrate=None):
-        self.uart = UART(1, baudrate or 9600)  # init with given baudrate
-        self.uart.init(baudrate or 9600, 8, None, 1)  # init with given parameters
-        self.uart.irq(UART.RX_ANY, 5, self.uart_handler(), IDLE)
+        # self.uart = UART(1, baudrate or 9600)  # init with given baudrate
+        # self.uart.init(baudrate or 9600, 8, None, 1)  # init with given parameters
+        # self.uart.irq(UART.RX_ANY, 5, self.uart_handler(), IDLE)
+
+        self.callback = None
 
         self.client_id = client_id
 
-        self.mqtt_user = username
-        self.mqtt_password = password
+        self.username = username
+        self.password = password
 
     def change_address(self, new_client_id: str):
         self.client_id = new_client_id
 
     # ///////////////////////////////////////////////////////////////////////////////////////
-    def uart_read(self) -> Optional[bytes]:
-        return self.uart.read()
+    # def uart_read(self) -> Optional[bytes]:
+    #     return self.uart.read()
 
-    def uart_write(self, data: bytes):
-        self.uart.write(data)
+    # def uart_write(self, data: bytes):
+    #     self.uart.write(data)
 
-    def uart_handler(self):
-        data = self.uart_read()
-        print(data)
+    # def uart_handler(self):
+    #     data = self.uart_read()
+    #     print(data)
 
     # ///////////////////////////////////////////////////////////////////////////////////////
     def check_message(self):
         pass
 
     def set_callback(self, func):
-        func("topic", "message")
+        self.callback = func
         pass
 
     # ///////////////////////////////////////////////////////////////////////////////////////
     def connect(self):
         # Fixed Header
-        fixed_header_byte1 = self.MessageType.CONNECT | self.Flags.NO_FLAGS
-        fixed_header_byte2 = 16
+        fixed_header = self.MessageTypeAndFlags.CONNECT | self.MessageTypeAndFlags.NO_FLAGS
 
+        # Variable Header
         # Protocol Name
-        variable_header_byte1 = 0
-        variable_header_byte2 = 4
-        variable_header_byte3 = b"M"
-        variable_header_byte4 = b"Q"
-        variable_header_byte5 = b"T"
-        variable_header_byte6 = b"T"
-
+        protocol_name = self.PROTOCOL_NAME
         # Protocol Version
-        variable_header_byte7 = 5
-
+        protocol_version = self.PROTOCOL_VERSION
         # Connect Flags
-        variable_header_byte8 = self.ConnectFlags.USERNAME | self.ConnectFlags.PASSWORD
-
+        connect_flags = self.ConnectFlags.USERNAME | self.ConnectFlags.PASSWORD | self.ConnectFlags.CLEAR_SESSION
         # Keep Alive
-        variable_header_byte9 = 0
-        variable_header_byte10 = 10
-
+        keep_alive = 60
         # Properties
         # Length
-        variable_header_byte11 = 5
+        property_length = 5
         # Session Expiry Interval identifier
-        variable_header_byte12 = 17
+        identifier = 17
         # Session Expiry Interval
-        variable_header_byte13 = 0
-        variable_header_byte14 = 0
-        variable_header_byte15 = 0
-        variable_header_byte16 = 10
+        expiry_interval = 60
 
-        data = bytes([fixed_header_byte1, fixed_header_byte2, variable_header_byte1, variable_header_byte2,
-                      variable_header_byte3, variable_header_byte4, variable_header_byte5, variable_header_byte6,
-                      variable_header_byte7, variable_header_byte8, variable_header_byte9, variable_header_byte10,
-                      variable_header_byte11, variable_header_byte12, variable_header_byte13, variable_header_byte14,
-                      variable_header_byte15, variable_header_byte16])
+        # Payload
+        # Client id length
+        client_id_length = len(self.client_id)
+        client_id = self.client_id
+        # Username length
+        username_length = len(self.username)
+        username = self.username
+        # Password length
+        password_length = len(self.password)
+        password = self.password
 
-        self.uart_write(data)
+        variable_header = ((protocol_name + protocol_version).encode() +
+                           connect_flags.to_bytes(1, 'big') +
+                           keep_alive.to_bytes(2, 'big') +
+                           property_length.to_bytes(1, 'big') +
+                           identifier.to_bytes(1, 'big') +
+                           expiry_interval.to_bytes(4, 'big'))
+
+        payload = (client_id_length.to_bytes(1, 'big') +
+                   client_id.encode() +
+                   username_length.to_bytes(1, 'big') +
+                   username.encode() +
+                   password_length.to_bytes(1, 'big') +
+                   password.encode())
+
+        # Fixed Header
+        length = len(variable_header + payload)
+
+        data = (fixed_header.to_bytes(1, 'big') + length.to_bytes(1, 'big') +
+                variable_header + payload)
+        # self.uart_write(data)
 
         return True
 

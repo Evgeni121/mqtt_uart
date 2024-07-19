@@ -16,7 +16,7 @@ mqtt.set_callback(callback_handler)
 
 while not mqtt.connect():
     print("Trying to connect...")
-    time.sleep(1)
+    time.sleep(5)
 
 answer = mqtt.subscribe("notifications")
 print(answer)
