@@ -2,8 +2,8 @@ from _ast import Or
 from enum import Flag, IntFlag
 from typing import Optional
 
-
-# from machine import UART, IDLE
+import time
+from machine import UART, IDLE
 
 
 class MQTTClient:
@@ -37,9 +37,9 @@ class MQTTClient:
         NO_FLAGS = 0b00000000
 
     def __init__(self, client_id: str, username, password, baudrate=None):
-        # self.uart = UART(1, baudrate or 9600)  # init with given baudrate
-        # self.uart.init(baudrate or 9600, 8, None, 1)  # init with given parameters
-        # self.uart.irq(UART.RX_ANY, 5, self.uart_handler(), IDLE)
+        self.uart = UART(1, baudrate or 9600)  # init with given baudrate
+        self.uart.init(baudrate or 9600, 8, None, 1)  # init with given parameters
+        self.uart.irq(UART.RX_ANY, 5, self.uart_handler(), IDLE)
 
         self.callback = None
 
@@ -52,15 +52,15 @@ class MQTTClient:
         self.client_id = new_client_id
 
     # ///////////////////////////////////////////////////////////////////////////////////////
-    # def uart_read(self) -> Optional[bytes]:
-    #     return self.uart.read()
+    def uart_read(self, num: int = None) -> Optional[bytes]:
+        return self.uart.read(num)
 
-    # def uart_write(self, data: bytes):
-    #     self.uart.write(data)
+    def uart_write(self, data: bytes):
+        self.uart.write(data)
 
-    # def uart_handler(self):
-    #     data = self.uart_read()
-    #     print(data)
+    def uart_handler(self):
+        data = self.uart_read()
+        print(data)
 
     # ///////////////////////////////////////////////////////////////////////////////////////
     def check_message(self):
@@ -122,9 +122,41 @@ class MQTTClient:
 
         data = (fixed_header.to_bytes(1, 'big') + length.to_bytes(1, 'big') +
                 variable_header + payload)
-        # self.uart_write(data)
 
-        return True
+        self.uart_write(data)
+
+        tm = time.time()
+        timeout = False
+        answer = self.uart_read(2)
+
+        while not answer and not timeout:
+            answer = self.uart_read(2)
+            timeout = time.time() - tm > 5
+
+        if not timeout:
+            message_type = int.from_bytes(answer[0])
+            length = int.from_bytes(answer[1])
+
+            if message_type == self.MessageTypeAndFlags.CONNACK:
+                tm = time.time()
+
+                answer = self.uart_read(length)
+
+                while not answer and not timeout:
+                    answer = self.uart_read(length)
+                    timeout = time.time() - tm > 5
+
+                if not timeout:
+                    reason_code = int.from_bytes(answer[1])
+
+                    if reason_code == 0:
+                        return True, None
+                    else:
+                        return False, reason_code
+                else:
+                    return False, -1
+        else:
+            return False, -1
 
     def disconnect(self):
         pass
