@@ -229,5 +229,71 @@ class MQTTClient:
     def unsubscribe(self, topic: str):
         pass
 
-    def publish(self, topic: str, message: bytes):
-        pass
+    def publish(self, request_topic: str, response_topic: str, message: bytes):
+        # Fixed Header
+        fixed_header = self.MessageTypeAndFlags.PUBLISH | self.MessageTypeAndFlags.NO_FLAGS
+
+        # Topic Length
+        request_topic_length = len(request_topic)
+
+        # Properties
+        # Length
+        property_length = 1 + 4 + 1 + len(response_topic)
+
+        identifier1 = 2
+        expiry_interval = 60
+
+        identifier2 = 8
+        response_topic_length = len(response_topic)
+
+        variable_header = (request_topic_length.to_bytes(2, 'big') +
+                           request_topic.encode() +
+                           property_length.to_bytes(1, 'big') +
+                           identifier1.to_bytes(1, 'big') +
+                           expiry_interval.to_bytes(4, 'big') +
+                           identifier2.to_bytes(1, 'big') +
+                           response_topic_length.to_bytes(2, 'big') +
+                           response_topic.encode())
+
+        # Payload
+        payload = message
+
+        # Fixed Header
+        length = len(variable_header + payload)
+
+        data = (fixed_header.to_bytes(1, 'big') + length.to_bytes(1, 'big') +
+                variable_header + payload)
+
+        self.uart_write(data)
+
+        tm = time.time()
+        timeout = False
+        answer = self.uart_read(2)
+
+        while not answer and not timeout:
+            answer = self.uart_read(2)
+            timeout = time.time() - tm > 5
+
+        if not timeout:
+            message_type = int.from_bytes(answer[0])
+            length = int.from_bytes(answer[1])
+
+            if message_type == self.MessageTypeAndFlags.PUBACK:
+                tm = time.time()
+                answer = self.uart_read(length)
+
+                while not answer and not timeout:
+                    answer = self.uart_read(length)
+                    timeout = time.time() - tm > 5
+
+                if not timeout:
+                    reason_code = int.from_bytes(answer[2])
+
+                    if reason_code == 0:
+                        return True, None
+                    else:
+                        return False, reason_code
+                else:
+                    return False, -1
+        else:
+            return False, -1
